@@ -1,83 +1,81 @@
-// create web server
+// Create web server
+
+// Import express
 const express = require('express');
-const bodyParser = require('body-parser');
-const {randomBytes} = require('crypto');
-const cors = require('cors');
 
-// create app
-const app = express();
-app.use(bodyParser.json());
-app.use(cors());
+// Import comment model
+const Comment = require('../models/comment');
 
-// create comments array
-const commentsByPostId = {};
+// Create router
+const router = express.Router();
 
-// create get request
-app.get('/posts/:id/comments', (req, res) => {
-    res.send(commentsByPostId[req.params.id] || []);
+// Create comment
+router.post('/comments', async (req, res) => {
+    try {
+        const comment = new Comment(req.body);
+        await comment.save();
+        res.status(201).send(comment);
+    } catch (e) {
+        res.status(400).send(e);
+    }
 });
 
-// create post request
-app.post('/posts/:id/comments', (req, res) => {
-    // create random id for comment
-    const commentId = randomBytes(4).toString('hex');
-    // get comment content from request body
-    const {content} = req.body;
-    // get comments for post id
-    const comments = commentsByPostId[req.params.id] || [];
-    // add new comment to comments array
-    comments.push({id: commentId, content, status: 'pending'});
-    // add comments array to commentsByPostId object
-    commentsByPostId[req.params.id] = comments;
+// Get comments
+router.get('/comments', async (req, res) => {
+    try {
+        const comments = await Comment.find({});
+        res.send(comments);
+    } catch (e) {
+        res.status(500).send();
+    }
+});
 
-    // emit event to event bus
-    axios.post('http://localhost:4005/events', {
-        type: 'CommentCreated',
-        data: {
-            id: commentId,
-            content,
-            postId: req.params.id,
-            status: 'pending'
+// Get comment by id
+router.get('/comments/:id', async (req, res) => {
+    try {
+        const comment = await Comment.findById(req.params.id);
+        if (!comment) {
+            return res.status(404).send();
         }
-    });
-
-    // send response
-    res.status(201).send(comments);
+        res.send(comment);
+    } catch (e) {
+        res.status(500).send();
+    }
 });
 
-// create post request
-app.post('/events', async (req, res) => {
-    console.log('Event Received: ', req.body.type);
+// Update comment by id
+router.patch('/comments/:id', async (req, res) => {
+    const updates = Object.keys(req.body);
+    const allowedUpdates = ['content', 'author'];
+    const isValidOperation = updates.every((update) => allowedUpdates.includes(update));
 
-    const {type, data} = req.body;
-
-    if (type === 'CommentModerated') {
-        const {postId, id, status, content} = data;
-
-        const comments = commentsByPostId[postId];
-
-        const comment = comments.find(comment => {
-            return comment.id === id;
-        });
-
-        comment.status = status;
-
-        // emit event to event bus
-        await axios.post('http://localhost:4005/events', {
-            type: 'CommentUpdated',
-            data: {
-                id,
-                status,
-                postId,
-                content
-            }
-        });
+    if (!isValidOperation) {
+        return res.status(400).send({error: 'Invalid updates!'});
     }
 
-    res.send({});
+    try {
+        const comment = await Comment.findByIdAndUpdate(req.params.id, req.body, {new: true, runValidators: true});
+        if (!comment) {
+            return res.status(404).send();
+        }
+        res.send(comment);
+    } catch (e) {
+        res.status(400).send(e);
+    }
 });
 
-// listen on port 4001
-app.listen(4001, () => {
-    console.log('Listening on 4001');
+// Delete comment by id
+router.delete('/comments/:id', async (req, res) => {
+    try {
+        const comment = await Comment.findByIdAndDelete(req.params.id);
+        if (!comment) {
+            return res.status(404).send();
+        }
+        res.send(comment);
+    } catch (e) {
+        res.status(500).send();
+    }
 });
+
+// Export router
+module.exports = router;
